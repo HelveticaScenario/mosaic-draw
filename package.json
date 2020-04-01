@@ -1,5 +1,5 @@
 {
-  "name": "My_Project_Here",
+  "name": "mosaic-draw",
   "version": "2.2.0",
   "private": true,
   "description": "Description of project here",
@@ -28,7 +28,7 @@
     "docker": "yarn --cwd ./docker",
     "docker-compose": "yarn --cwd ./docker compose"
   },
-  "author": "Benjie Gillam <code@benjiegillam.com>",
+  "author": "Daniel Lewis <dan@helveticascenario.dev>",
   "license": "SEE LICENSE IN LICENSE.md",
   "dependencies": {
     "abort-controller": "^3.0.0",
