@@ -118,3 +118,90 @@ relevant operations on them. The tables will appear when you uncomment the
 -- comment on table app_public.user_feed_posts is 'A feed of `Post`s relevant to a particular `User`.';
 -- comment on column app_public.user_feed_posts.id is 'An identifier for this entry in the feed.';
 -- comment on column app_public.user_feed_posts.created_at is 'The time this feed item was added.';
+
+drop function if exists app_public.get_free_block;
+drop function if exists app_public.assign_block;
+drop function if exists app_public.create_block;
+drop function if exists app_public.create_mosaic;
+drop table if exists app_public.blocks;
+drop table if exists app_public.mosaics;
+
+create table app_public.mosaics (
+  mosaic_id UUID primary key default gen_random_uuid(),
+  width int not null check (width % 2 = 1 and width > 0),
+  height int not null check (height % 2 = 1 and height > 0)
+);
+
+grant
+  select
+on app_public.mosaics to :DATABASE_VISITOR;
+
+create table app_public.blocks (
+  block_id UUID primary key default gen_random_uuid(),
+  mosaic_id UUID not null references app_public.mosaics on delete cascade,
+  pixels json not null default '[[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]]'::json,
+  completed boolean not null default false,
+  idx int not null check (idx >= 0),
+  user_id UUID references app_public.users,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  assigned_at timestamptz,
+  UNIQUE (mosaic_id, idx)
+);
+alter table app_public.blocks enable row level security;
+
+grant
+  select,
+  update (pixels, completed)
+on app_public.blocks to :DATABASE_VISITOR;
+
+create function app_public.create_mosaic() returns app_public.mosaics as $$
+  insert into app_public.mosaics(width, height) values (9, 9) returning *;
+$$ language sql volatile;
+
+create function app_public.create_block(idx int, mosaic_id UUID) returns app_public.blocks as $$
+  insert into app_public.blocks(mosaic_id, idx) values (mosaic_id, idx) returning *;
+$$ language sql volatile;
+
+create function app_public.assign_block(block_id UUID, user_id UUID) returns app_public.blocks as $$
+  update
+    app_public.blocks
+  set
+    user_id = user_id,
+    pixels = '[[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0],[0,0,0]]'::json,
+    assigned_at = now(),
+    completed = false
+  where
+    block_id = block_id
+  returning *;
+$$ language sql volatile;
+
+create function app_public.get_free_block() returns app_public.blocks as $$
+declare
+  unassigned_block_id UUID;
+  new_block app_public.blocks;
+  new_mosaic app_public.mosaics;
+begin
+  if exists (
+    select
+      blocks.block_id
+    into
+      unassigned_block_id
+    from
+      app_public.blocks as blocks
+    where
+      blocks.user_id = null
+    order by
+      blocks.idx
+    limit 1
+  ) then
+    return app_public.assign_block(unassigned_block_id, app_public.current_user_id());
+  else
+    new_mosaic := app_public.create_mosaic();
+    for idx in (new_mosaic.width * new_mosaic.height)..1 loop
+      new_block := app_public.create_block(idx - 1, new_mosaic.mosaic_id);
+    end loop;
+    return app_public.assign_block(new_block.block_id, app_public.current_user_id());
+  end if;
+end;
+$$ language plpgsql strict volatile security definer set search_path to pg_catalog, public, pg_temp;
